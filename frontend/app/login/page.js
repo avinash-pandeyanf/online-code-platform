@@ -15,7 +15,11 @@ export default function Login() {
     try {
       const res = await fetch(API_ENDPOINTS.login, {
         method: "POST",
-        ...API_CONFIG,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        mode: 'cors',
+        credentials: 'same-origin',
         body: JSON.stringify({ username, password }),
       });
       const data = await res.json();

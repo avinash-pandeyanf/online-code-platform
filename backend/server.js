@@ -29,15 +29,17 @@ const limiter = rateLimit({
 });
 app.use('/login', limiter);
 
-// CORS configuration
+// CORS configuration - before other middleware
 app.use(cors({
-  origin: process.env.CORS_ORIGIN.split(','),
+  origin: ['https://onlinecodeplat.netlify.app', 'http://localhost:3000'],
   credentials: true,
-  methods: ['GET', 'POST'],
+  methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   exposedHeaders: ['Authorization'],
-  maxAge: 600 // 10 minutes
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }));
+
 app.use(bodyParser.json());
 
 // SQLite Database Setup
