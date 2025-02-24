@@ -12,24 +12,31 @@ export default function Login() {
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    setError(''); // Clear previous errors
+    
+    if (!username || !password) {
+      setError('Username and password are required');
+      return;
+    }
+
     try {
       const res = await fetch(API_ENDPOINTS.login, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Accept": "application/json"
         },
-        mode: 'cors',
-        credentials: 'include',
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ 
+          username: username.trim(), 
+          password: password 
+        }),
       });
-      
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.message || 'Login failed');
-      }
 
       const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.message || 'Login failed');
+      }
+
       if (data.token) {
         localStorage.setItem("token", data.token);
         router.replace("/");
