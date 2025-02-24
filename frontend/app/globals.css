@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --light-bg: #f0f0f0;
+  --light-text: #333;
+  --light-header: #ffffff;
+  --light-button: #dddddd;
+  --light-input: #ffffff;
+  --light-output: #eeeeee;
+  --dark-bg: #1a1a1a;
+  --dark-text: #dddddd;
+  --dark-header: #333333;
+  --dark-button: #555555;
+  --dark-input: #333333;
+  --dark-output: #444444;
+}
+
+body {
+  background-color: var(--light-bg);
+  color: var(--light-text);
+}
+
+.dark body {
+  background-color: var(--dark-bg);
+  color: var(--dark-text);
+}
