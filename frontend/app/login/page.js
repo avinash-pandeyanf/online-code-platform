@@ -17,21 +17,28 @@ export default function Login() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Accept": "application/json"
         },
         mode: 'cors',
-        credentials: 'same-origin',
+        credentials: 'include',
         body: JSON.stringify({ username, password }),
       });
-      const data = await res.json();
       
-      if (res.ok) {
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.message || 'Login failed');
+      }
+
+      const data = await res.json();
+      if (data.token) {
         localStorage.setItem("token", data.token);
         router.replace("/");
       } else {
-        setError(data.message);
+        throw new Error('No token received');
       }
     } catch (err) {
-      setError("Failed to connect to the server");
+      console.error('Login error:', err);
+      setError(err.message || "Failed to connect to the server");
     }
   };
 

@@ -34,7 +34,7 @@ app.use(cors({
   origin: ['https://onlinecodeplat.netlify.app', 'http://localhost:3000'],
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
   exposedHeaders: ['Authorization'],
   preflightContinue: false,
   optionsSuccessStatus: 204
@@ -92,6 +92,7 @@ const authenticate = (req, res, next) => {
 
 // Login Endpoint with password hashing
 app.post('/login', async (req, res) => {
+  console.log('Login request received:', req.body); // Add logging
   const { username, password } = req.body;
   
   if (!username || !password) {
@@ -101,44 +102,62 @@ app.post('/login', async (req, res) => {
   try {
     const user = await new Promise((resolve, reject) => {
       db.get('SELECT * FROM users WHERE username = ?', [username], (err, row) => {
-        if (err) reject(err);
+        if (err) {
+          console.error('Database error:', err); // Add logging
+          reject(err);
+        }
         resolve(row);
       });
     });
 
     if (!user) {
+      // New user registration
       const hashedPassword = await bcrypt.hash(password, 12);
-      const result = await new Promise((resolve, reject) => {
-        db.run('INSERT INTO users (username, password) VALUES (?, ?)', 
-          [username, hashedPassword], 
-          function(err) {
-            if (err) reject(err);
-            resolve(this.lastID);
-          });
-      });
-      
-      const token = jwt.sign(
-        { id: result },
-        process.env.JWT_SECRET,
-        { expiresIn: '1h', algorithm: 'HS256' }
-      );
-      res.json({ token });
-    } else {
-      const isValid = await bcrypt.compare(password, user.password);
-      if (!isValid) {
-        return res.status(401).json({ message: 'Invalid credentials' });
+      try {
+        const result = await new Promise((resolve, reject) => {
+          db.run('INSERT INTO users (username, password) VALUES (?, ?)', 
+            [username, hashedPassword], 
+            function(err) {
+              if (err) {
+                console.error('User creation error:', err); // Add logging
+                reject(err);
+              }
+              resolve(this.lastID);
+            });
+        });
+        
+        const token = jwt.sign(
+          { id: result },
+          process.env.JWT_SECRET,
+          { expiresIn: '1h', algorithm: 'HS256' }
+        );
+        return res.status(201).json({ token });
+      } catch (err) {
+        console.error('Registration error:', err); // Add logging
+        return res.status(500).json({ message: 'Error creating user' });
       }
-      
-      const token = jwt.sign(
-        { id: user.id },
-        process.env.JWT_SECRET,
-        { expiresIn: '1h', algorithm: 'HS256' }
-      );
-      res.json({ token });
+    } else {
+      // Existing user login
+      try {
+        const isValid = await bcrypt.compare(password, user.password);
+        if (!isValid) {
+          return res.status(401).json({ message: 'Invalid credentials' });
+        }
+        
+        const token = jwt.sign(
+          { id: user.id },
+          process.env.JWT_SECRET,
+          { expiresIn: '1h', algorithm: 'HS256' }
+        );
+        return res.status(200).json({ token });
+      } catch (err) {
+        console.error('Password comparison error:', err); // Add logging
+        return res.status(500).json({ message: 'Server error during authentication' });
+      }
     }
   } catch (err) {
-    console.error('Login error:', err);
-    res.status(500).json({ message: 'Server error' });
+    console.error('Login error:', err); // Add logging
+    return res.status(500).json({ message: 'Server error' });
   }
 });
 
