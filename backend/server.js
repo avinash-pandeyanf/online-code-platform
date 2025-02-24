@@ -13,7 +13,11 @@ const app = express();
 const port = process.env.PORT || 3001;
 
 app.use(cors({
-  origin: ['http://localhost:3000', 'https://your-frontend-domain.netlify.app'],
+  origin: [
+    'http://localhost:3000',
+    'https://onlinecodeplat.netlify.app/',
+    process.env.CORS_ORIGIN
+  ].filter(Boolean),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
