@@ -2,14 +2,11 @@
   command = "npm run build"
   publish = "out"
 
-[[plugins]]
-  package = "@netlify/plugin-nextjs"
+[build.environment]
+  NEXT_PUBLIC_API_URL = "https://online-code-platform.onrender.com"
+  NODE_VERSION = "18"
 
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
-
-[build.environment]
-  NEXT_PUBLIC_API_URL = "https://your-backend-url.onrender.com"
-  NETLIFY_NEXT_PLUGIN_SKIP = "true"
