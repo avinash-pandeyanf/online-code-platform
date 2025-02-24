@@ -5,3 +5,10 @@ export const API_ENDPOINTS = {
   execute: `${API_BASE_URL}/execute`,
   submissions: `${API_BASE_URL}/submissions`,
 };
+
+export const API_CONFIG = {
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  credentials: 'include'
+};

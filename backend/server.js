@@ -9,18 +9,34 @@ const vm = require('vm');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
+const rateLimit = require('express-rate-limit');
+const xss = require('xss-clean');
+const helmet = require('helmet');
 const app = express();
 const port = process.env.PORT || 3001;
 
+// Security middleware
+app.use(helmet());
+app.use(xss());
+app.set('trust proxy', 1);
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.'
+});
+app.use('/login', limiter);
+
+// CORS configuration
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'https://onlinecodeplat.netlify.app/',
-    process.env.CORS_ORIGIN
-  ].filter(Boolean),
+  origin: process.env.CORS_ORIGIN.split(','),
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['Authorization'],
+  maxAge: 600 // 10 minutes
 }));
 app.use(bodyParser.json());
 
@@ -59,9 +75,6 @@ db.serialize(() => {
   db.run(`CREATE INDEX IF NOT EXISTS idx_submissions_hash ON submissions(hash)`);
 });
 
-// Rate limiting
-const rateLimit = {};
-
 // Authentication Middleware
 const authenticate = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
@@ -71,49 +84,76 @@ const authenticate = (req, res, next) => {
     if (err) return res.status(401).json({ message: 'Unauthorized' });
     req.userId = decoded.id;
 
-    // Implement rate limiting
-    if (!rateLimit[req.userId]) {
-      rateLimit[req.userId] = {
-        count: 1,
-        firstRequest: Date.now()
-      };
-    } else {
-      // Reset counter after 1 hour
-      if (Date.now() - rateLimit[req.userId].firstRequest > 3600000) {
-        rateLimit[req.userId] = {
-          count: 1,
-          firstRequest: Date.now()
-        };
-      } else if (rateLimit[req.userId].count >= 100) {
-        return res.status(429).json({ message: 'Too many requests' });
-      }
-      rateLimit[req.userId].count++;
-    }
-
     next();
   });
 };
 
-// Login Endpoint
-app.post('/login', (req, res) => {
+// Login Endpoint with password hashing
+app.post('/login', async (req, res) => {
   const { username, password } = req.body;
-  db.get('SELECT * FROM users WHERE username = ? AND password = ?', [username, password], (err, user) => {
-    if (err) return res.status(500).json({ message: 'Database error' });
-    if (!user) {
-      db.run('INSERT INTO users (username, password) VALUES (?, ?)', [username, password], function(err) {
-        if (err) return res.status(500).json({ message: 'Error creating user' });
-        const token = jwt.sign({ id: this.lastID }, process.env.JWT_SECRET, { expiresIn: '1h' });
-        res.json({ token });
+  
+  if (!username || !password) {
+    return res.status(400).json({ message: 'Username and password required' });
+  }
+
+  try {
+    const user = await new Promise((resolve, reject) => {
+      db.get('SELECT * FROM users WHERE username = ?', [username], (err, row) => {
+        if (err) reject(err);
+        resolve(row);
       });
+    });
+
+    if (!user) {
+      const hashedPassword = await bcrypt.hash(password, 12);
+      const result = await new Promise((resolve, reject) => {
+        db.run('INSERT INTO users (username, password) VALUES (?, ?)', 
+          [username, hashedPassword], 
+          function(err) {
+            if (err) reject(err);
+            resolve(this.lastID);
+          });
+      });
+      
+      const token = jwt.sign(
+        { id: result },
+        process.env.JWT_SECRET,
+        { expiresIn: '1h', algorithm: 'HS256' }
+      );
+      res.json({ token });
     } else {
-      const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+      const isValid = await bcrypt.compare(password, user.password);
+      if (!isValid) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+      
+      const token = jwt.sign(
+        { id: user.id },
+        process.env.JWT_SECRET,
+        { expiresIn: '1h', algorithm: 'HS256' }
+      );
       res.json({ token });
     }
-  });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
 });
 
 // Execute code in a safe environment
 const executeCode = async (code, language) => {
+  // Input validation
+  if (!code || typeof code !== 'string') {
+    throw new Error('Invalid code input');
+  }
+
+  if (!['javascript', 'python'].includes(language)) {
+    throw new Error('Unsupported language');
+  }
+
+  // Sanitize code
+  code = code.replace(/[^a-zA-Z0-9\s+\-*/=><{}\[\]().,;:'"!?]/g, '');
+
   const start = Date.now();
   let output = '';
   let error = '';

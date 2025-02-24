@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { API_ENDPOINTS } from "../config/api";
+import { API_ENDPOINTS, API_CONFIG } from "../config/api";
 
 export default function Login() {
   const [username, setUsername] = useState("");
@@ -15,10 +15,7 @@ export default function Login() {
     try {
       const res = await fetch(API_ENDPOINTS.login, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: 'include',
+        ...API_CONFIG,
         body: JSON.stringify({ username, password }),
       });
       const data = await res.json();
