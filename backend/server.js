@@ -175,7 +175,7 @@ const executeCode = async (code, language) => {
     throw new Error('Invalid code input');
   }
 
-  if (!['javascript', 'python'].includes(language)) {
+  if (!['javascript', 'python', 'java', 'cpp', 'ruby'].includes(language)) {
     throw new Error('Unsupported language');
   }
 
@@ -184,14 +184,43 @@ const executeCode = async (code, language) => {
 
   let output = '';
   let error = '';
-  const start = Date.now();
 
   try {
     switch (language) {
       case 'javascript':
-        const result = vm.runInNewContext(code, {}, { timeout: 5000 });
-        output = result !== undefined ? String(result) : '';
+        let consoleOutput = [];
+        const context = {
+          console: {
+            log: (...args) => {
+              consoleOutput.push(args.map(arg => String(arg)).join(' '));
+            },
+            error: (...args) => {
+              consoleOutput.push('Error: ' + args.map(arg => String(arg)).join(' '));
+            },
+            warn: (...args) => {
+              consoleOutput.push('Warning: ' + args.map(arg => String(arg)).join(' '));
+            }
+          },
+          setTimeout: (cb, ms) => {
+            if (ms > 5000) throw new Error('Timeout too long');
+            cb();
+          },
+          setInterval: () => {
+            throw new Error('setInterval is not allowed');
+          }
+        };
+        
+        const result = vm.runInNewContext(code, context, { 
+          timeout: 5000,
+          displayErrors: true
+        });
+        
+        output = consoleOutput.join('\n');
+        if (result !== undefined && !output) {
+          output = String(result);
+        }
         break;
+
       case 'python':
         const pythonFile = path.join(__dirname, `temp_${Date.now()}.py`);
         fs.writeFileSync(pythonFile, code);
@@ -204,9 +233,80 @@ const executeCode = async (code, language) => {
         output = pythonResult.stdout;
         error = pythonResult.stderr;
         break;
-      // Add other language cases as needed
-      default:
-        throw new Error('Unsupported language');
+
+      case 'java':
+        const javaFile = path.join(__dirname, `Main_${Date.now()}.java`);
+        const javaCode = `
+          public class Main_${Date.now()} {
+            public static void main(String[] args) {
+              ${code}
+            }
+          }`;
+        fs.writeFileSync(javaFile, javaCode);
+        try {
+          await new Promise((resolve, reject) => {
+            exec(`javac "${javaFile}"`, { timeout: 5000 }, (err, stdout, stderr) => {
+              if (err) reject(new Error(stderr));
+              resolve(stdout);
+            });
+          });
+          const javaResult = await new Promise((resolve) => {
+            exec(`java -cp "${path.dirname(javaFile)}" Main_${Date.now()}`, 
+              { timeout: 5000 }, 
+              (err, stdout, stderr) => {
+                resolve({ stdout, stderr: err ? err.message : stderr });
+            });
+          });
+          output = javaResult.stdout;
+          error = javaResult.stderr;
+        } finally {
+          fs.unlinkSync(javaFile);
+          fs.unlinkSync(javaFile.replace('.java', '.class'));
+        }
+        break;
+
+      case 'cpp':
+        const cppFile = path.join(__dirname, `temp_${Date.now()}.cpp`);
+        const exeFile = path.join(__dirname, `temp_${Date.now()}.exe`);
+        const cppCode = `
+          #include <iostream>
+          int main() {
+            ${code}
+            return 0;
+          }`;
+        fs.writeFileSync(cppFile, cppCode);
+        try {
+          await new Promise((resolve, reject) => {
+            exec(`g++ "${cppFile}" -o "${exeFile}"`, { timeout: 5000 }, (err, stdout, stderr) => {
+              if (err) reject(new Error(stderr));
+              resolve(stdout);
+            });
+          });
+          const cppResult = await new Promise((resolve) => {
+            exec(exeFile, { timeout: 5000 }, (err, stdout, stderr) => {
+              resolve({ stdout, stderr: err ? err.message : stderr });
+            });
+          });
+          output = cppResult.stdout;
+          error = cppResult.stderr;
+        } finally {
+          fs.unlinkSync(cppFile);
+          if (fs.existsSync(exeFile)) fs.unlinkSync(exeFile);
+        }
+        break;
+
+      case 'ruby':
+        const rubyFile = path.join(__dirname, `temp_${Date.now()}.rb`);
+        fs.writeFileSync(rubyFile, code);
+        const rubyResult = await new Promise((resolve) => {
+          exec(`ruby "${rubyFile}"`, { timeout: 5000 }, (err, stdout, stderr) => {
+            fs.unlinkSync(rubyFile);
+            resolve({ stdout, stderr: err ? err.message : stderr });
+          });
+        });
+        output = rubyResult.stdout;
+        error = rubyResult.stderr;
+        break;
     }
   } catch (err) {
     error = err.message || 'Execution error';
