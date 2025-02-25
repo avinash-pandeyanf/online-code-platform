@@ -51,6 +51,12 @@ const db = new sqlite3.Database(process.env.DATABASE_PATH || './codeplatform.db'
   }
 });
 
+// Add this check after database setup
+if (!process.env.JWT_SECRET) {
+  console.error('JWT_SECRET is not set in environment variables');
+  process.exit(1);
+}
+
 // Create tables
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS users (
@@ -76,6 +82,27 @@ db.serialize(() => {
   db.run(`CREATE INDEX IF NOT EXISTS idx_submissions_userId ON submissions(userId)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_submissions_hash ON submissions(hash)`);
 });
+
+// Add these checks at the start of the file after the imports
+const checkLanguageSupport = () => {
+  const checks = {
+    python: 'python --version',
+    java: 'java -version',
+    ruby: 'ruby --version',
+    cpp: 'g++ --version'
+  };
+
+  Object.entries(checks).forEach(([lang, command]) => {
+    exec(command, (error) => {
+      if (error) {
+        console.warn(`WARNING: ${lang} is not properly installed or accessible`);
+      }
+    });
+  });
+};
+
+// Call this after database setup
+checkLanguageSupport();
 
 // Authentication Middleware
 const authenticate = (req, res, next) => {
@@ -179,13 +206,31 @@ const executeCode = async (code, language) => {
     throw new Error('Unsupported language');
   }
 
-  // Sanitize code
-  code = code.replace(/[^a-zA-Z0-9\s+\-*/=><{}\[\]().,;:'"!?]/g, '');
-
+  const start = Date.now(); // Add this line to track execution time
   let output = '';
   let error = '';
 
+  // Create a temp directory if it doesn't exist
+  const tempDir = path.join(__dirname, 'temp');
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir);
+  }
+
   try {
+    // Add this check
+    if (!fs.existsSync(tempDir)) {
+      await fs.promises.mkdir(tempDir, { recursive: true });
+    }
+
+    // Add deployment-specific error handling
+    const execOptions = {
+      timeout: 5000,
+      maxBuffer: 1024 * 1024,
+      env: { ...process.env },
+      cwd: tempDir,
+      windowsHide: true
+    };
+
     switch (language) {
       case 'javascript':
         let consoleOutput = [];
@@ -222,16 +267,29 @@ const executeCode = async (code, language) => {
         break;
 
       case 'python':
-        const pythonFile = path.join(__dirname, `temp_${Date.now()}.py`);
-        fs.writeFileSync(pythonFile, code);
-        const pythonResult = await new Promise((resolve) => {
-          exec(`python ${pythonFile}`, { timeout: 5000 }, (err, stdout, stderr) => {
-            fs.unlinkSync(pythonFile);
-            resolve({ stdout, stderr: err ? err.message : stderr });
+        const pythonFile = path.join(tempDir, `temp_${Date.now()}.py`);
+        await fs.promises.writeFile(pythonFile, code);
+        try {
+          const { stdout, stderr } = await new Promise((resolve, reject) => {
+            // Check for both python3 and python
+            const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+            exec(`${pythonCmd} "${pythonFile}"`, execOptions, (error, stdout, stderr) => {
+              if (error) {
+                if (error.killed) {
+                  reject(new Error('Execution timed out'));
+                } else {
+                  reject(new Error(stderr || error.message));
+                }
+              }
+              resolve({ stdout, stderr });
+            });
           });
-        });
-        output = pythonResult.stdout;
-        error = pythonResult.stderr;
+          output = stdout;
+          error = stderr;
+        } catch (e) {
+          error = `Execution Error: ${e.message}`;
+          console.error('Python execution error:', e);
+        }
         break;
 
       case 'java':
@@ -310,11 +368,22 @@ const executeCode = async (code, language) => {
     }
   } catch (err) {
     error = err.message || 'Execution error';
+    console.error('Code execution error:', err);
+  }
+
+  // Clean up temp directory if empty
+  try {
+    const files = await fs.promises.readdir(tempDir);
+    if (files.length === 0) {
+      await fs.promises.rmdir(tempDir);
+    }
+  } catch (err) {
+    console.error('Error cleaning up temp directory:', err);
   }
 
   return {
-    output: output || '',
-    error: error || '',
+    output: output.trim(),
+    error: error.trim(),
     executionTime: Date.now() - start
   };
 };
